@@ -8,10 +8,8 @@ def clear_screen():
 
 if __name__ == '__main__':
     while True:
-        session_token = input('Please enter your session token: ')
-        conversation_id = input(
-            'Please enter your conversation id (if you want to continue old chat): '
-        )
+        session_token = open('token.txt', 'r').read()
+        conversation_id = ''
         chat = ChatGPT(session_token, conversation_id)
         break
 
@@ -30,6 +28,5 @@ if __name__ == '__main__':
             continue
         if prompt.lower() == 'quit':
             break
-        print('\nChatGPT: ', end='')
         response = chat.send_message(prompt)
         print(response['message'], end='')

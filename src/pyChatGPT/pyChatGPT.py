@@ -15,7 +15,6 @@ import time
 import re
 import os
 
-
 cf_challenge_form = (By.ID, 'challenge-form')
 
 chatgpt_textbox = (By.TAG_NAME, 'textarea')
@@ -25,6 +24,7 @@ chatgpt_small_response = (
     By.XPATH,
     '//div[starts-with(@class, "markdown prose w-full break-words")]',
 )
+chatgpt_response = (By.CLASS_NAME, 'markdown prose w-full break-words dark:prose-invert light')
 chatgpt_alert = (By.XPATH, '//div[@role="alert"]')
 chatgpt_intro = (By.ID, 'headlessui-portal-root')
 chatgpt_login_btn = (By.XPATH, '//button[text()="Log in"]')
@@ -48,19 +48,19 @@ class ChatGPT:
     '''
 
     def __init__(
-        self,
-        session_token: str = None,
-        conversation_id: str = '',
-        auth_type: str = None,
-        email: str = None,
-        password: str = None,
-        login_cookies_path: str = '',
-        captcha_solver: str = 'pypasser',
-        solver_apikey: str = '',
-        proxy: str = None,
-        chrome_args: list = [],
-        moderation: bool = True,
-        verbose: bool = False,
+            self,
+            session_token: str = None,
+            conversation_id: str = '',
+            auth_type: str = None,
+            email: str = None,
+            password: str = None,
+            login_cookies_path: str = '',
+            captcha_solver: str = 'pypasser',
+            solver_apikey: str = '',
+            proxy: str = None,
+            chrome_args: list = [],
+            moderation: bool = True,
+            verbose: bool = False,
     ):
         '''
         Initialize the ChatGPT object\n
@@ -92,7 +92,7 @@ class ChatGPT:
         self.__moderation = moderation
 
         if not self.__session_token and (
-            not self.__email or not self.__password or not self.__auth_type
+                not self.__email or not self.__password or not self.__auth_type
         ):
             raise ValueError(
                 'Please provide either a session token or login credentials'
@@ -104,7 +104,7 @@ class ChatGPT:
         if self.__captcha_solver == '2captcha' and not self.__solver_apikey:
             raise ValueError('Please provide a 2captcha apikey')
         if self.__proxy and not re.findall(
-            r'(https?|socks(4|5)?):\/\/.+:\d{1,5}', self.__proxy
+                r'(https?|socks(4|5)?):\/\/.+:\d{1,5}', self.__proxy
         ):
             raise ValueError('Invalid proxy format')
         if self.__auth_type == 'openai' and self.__captcha_solver == 'pypasser':
@@ -125,6 +125,12 @@ class ChatGPT:
 
         self.__init_browser()
         weakref.finalize(self, self.__del__)
+        try:
+            element = self.driver.find_element(By.XPATH, "//*[contains(text(), 'Okay, let’s go')]")
+            parent = element.find_element(By.XPATH, "..")
+            parent.click()
+        except SeleniumExceptions.NoSuchElementException:
+            pass
 
     def __del__(self):
         '''
@@ -145,6 +151,8 @@ class ChatGPT:
         '''
         self.logger = logging.getLogger('pyChatGPT')
         self.logger.setLevel(logging.DEBUG)
+        console_handler = logging.StreamHandler()
+        self.logger.addHandler(console_handler)
         if verbose:
             formatter = logging.Formatter('[%(funcName)s] %(message)s')
             stream_handler = logging.StreamHandler()
@@ -261,7 +269,7 @@ class ChatGPT:
             response = self.driver.find_element(By.TAG_NAME, 'pre').text
         response = json.loads(response)
         if (not response) or (
-            'error' in response and response['error'] == 'RefreshAccessTokenError'
+                'error' in response and response['error'] == 'RefreshAccessTokenError'
         ):
             self.logger.debug('Authorization is invalid')
             if not self.__auth_type:
@@ -349,8 +357,8 @@ class ChatGPT:
         while self.__is_active:
             self.logger.debug('Updating session...')
             payload = (
-                '{"event":"session","data":{"trigger":"getSession"},"timestamp":%d}'
-                % int(time.time())
+                    '{"event":"session","data":{"trigger":"getSession"},"timestamp":%d}'
+                    % int(time.time())
             )
             try:
                 self.driver.execute_script(
@@ -393,7 +401,7 @@ class ChatGPT:
             response = self.driver.find_elements(*chatgpt_small_response)[-1]
             content = response.text
             if content != prev_content:
-                yield content[len(prev_content) :]
+                yield content[len(prev_content):]
                 prev_content = content
             if not result_streaming:
                 break
@@ -412,40 +420,30 @@ class ChatGPT:
             EC.element_to_be_clickable(chatgpt_textbox)
         )
         textbox.click()
-        self.driver.execute_script(
-            '''
-        var element = arguments[0], txt = arguments[1];
-        element.value += txt;
-        element.dispatchEvent(new Event("change"));
-        ''',
-            textbox,
-            message,
-        )
-        textbox.send_keys(Keys.ENTER)
+        textbox.send_keys(message)
+        send_button = self.driver.find_element(By.CSS_SELECTOR, '[data-testid="send-button"]')
+        send_button.click()
 
         if stream:
             for i in self.__stream_message():
                 print(i, end='')
                 time.sleep(0.1)
-            return print()
+            print()
 
         self.logger.debug('Waiting for completion...')
+        time.sleep(4)  # waiting for chatgpt_streaming
         WebDriverWait(self.driver, 120).until_not(
             EC.presence_of_element_located(chatgpt_streaming)
         )
 
         self.logger.debug('Getting response...')
-        responses = self.driver.find_elements(*chatgpt_big_response)
-        if responses:
-            response = responses[-1]
-            if 'text-red' in response.get_attribute('class'):
-                self.logger.debug('Response is an error')
-                raise ValueError(response.text)
-        response = self.driver.find_elements(*chatgpt_small_response)[-1]
-
-        content = markdownify(response.get_attribute('innerHTML')).replace(
-            'Copy code`', '`'
-        )
+        response = self.find_last_response()
+        content = response.text
+        # response = self.driver.find_elements(By.TAG_NAME, 'p')[-1]
+        #
+        # content = markdownify(response.get_attribute('innerHTML')).replace(
+        #     'Copy code`', '`'
+        # )
         pattern = re.compile(
             r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
         )
@@ -509,3 +507,15 @@ class ChatGPT:
         self.driver.get(chatgpt_chat_url)
         self.__check_capacity(chatgpt_chat_url)
         self.__check_blocking_elements()
+
+    def find_last_response(self):
+        count = 2
+        res = None
+        while True:
+            try:
+                element = self.driver.find_element(By.CSS_SELECTOR, f'[data-testid="conversation-turn-{count}"]')
+                res = element
+                count += 1
+            except SeleniumExceptions.NoSuchElementException:
+                break
+        return res
